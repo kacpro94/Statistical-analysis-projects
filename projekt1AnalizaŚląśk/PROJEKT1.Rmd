@@ -1,0 +1,587 @@
+---
+title: "Zróżnicowanie poziomu życia w województwie Śląskim"
+author: "Kacper Prorok"
+date: "2024-10-04"
+output: 
+  html_document:
+    code_folding: hide
+    theme: journal
+    toc: yes
+    toc_float:
+      collapsed: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+```{python}
+import numpy as np
+import pandas as pd
+import glob
+import openpyxl
+import seaborn as sns 
+import matplotlib.pyplot as plt
+import plotly
+import plotly.express as px
+import plotly.graph_objects as go
+from IPython.display import display, HTML
+
+
+
+
+bezrobotni=pd.read_csv(r"C:\Users\kacpr\Documents\semestr 5\SAD\tabela.csv",sep=';',index_col=0,encoding='utf-8')
+
+tabela=pd.DataFrame(bezrobotni)
+
+tabela.loc[:,tabela.columns !='mieszkania']=tabela.loc[:,tabela.columns !='mieszkania'].map(lambda x: str(x).replace(',','.'))
+tabela['mieszkania']=tabela['mieszkania'].astype(str)
+tabela.loc[:,tabela.columns =='mieszkania']=tabela.loc[:,tabela.columns =='mieszkania'].map(lambda x: x.replace('.',''))
+
+tabela=tabela.apply(pd.to_numeric)
+```
+
+
+# Wstęp
+
+Celem niniejszego badania jest uwidocznienie zróżnicowania poziomu życia oraz wybranie 'najelpszego do życia' powiatu w województwie Śląskim. Również byłem ciekawy jak wygląda podział wojewódźtwa ze względu na jakość życia i jakie regiony są najbardziej przystępne.
+Moja praca wzorowana jest na publikacji Uniwersytetu Ekonomicznego w Poznaniu pod tytułem "Przestrzenne zróżnicowanie życia w województwie Wielkopolskim" autorstwa Doroty Strózik oraz Tomasza Strózika.
+
+
+# EDA
+
+Przedstawiam kilka początkowych wierszy moich danych:
+
+```{python results='hide'}
+tabela.head()
+```
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/head.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+Odrazu sprawdzam czy nie ma jakichś wartości brakujących
+
+```{python}
+tabela.isnull().sum()
+```
+
+Dane są bez braków.
+
+
+## Zmienne diagnostyczne
+
+Wszystkie dane pochodzą z BDL i są z 2022 roku.
+
+Wybrane przeze mnie zmienne diagnostyczne wyglądają następująco:
+
+- 'bezrobotni'  bezrobotni na 1 ofertę pracy. Wskaźnik jest liczony według wzoru: osoby zarejstrowane jako bezrobotne(suma stanów miesięcznych)/ suma ofert pracy w ciągu roku. 
+- 'drogi rowerowe'  długość drogi rowerowej przypadającej na 10 tys. ludności
+- 'lekarze'  ilość lekarzy(ogółem) przypadająca na 10 tys. ludności
+- 'kanalizacja' korzystający z instalacji w % ogółu ludności
+- 'mieszkania' mieszkania oddane do użytkowania na 1000 zawartych małżeństw
+- 'miejsca spoleczne' placówki stacjonarnej pomocy społecznej na 10 tys. ludności
+- 'zgony' zgony niemowląt na 1000 żywych urodzeń
+- 'bezrobocie' udział bezrobotnych pozsotających bez pracy dłużej niż rok w bezrobotnych ogółem
+- 'samochody' samochody osobowe na 1000 ludności
+- 'parki' powierzchnia parków,zieleńców i terenów zieleni osiedlowej na 1 mieszkańca w m2
+
+
+## Statystyki opisowe
+
+
+```{python results='hide'}
+print(tabela.describe())
+```
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/describe.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+
+## Wykrest gętości
+
+```{python  echo=FALSE,results='hide',fig.keep='all'}
+i=1
+fig = plt.figure(figsize=(12, 10)) 
+for column in tabela.columns:
+    ax = fig.add_subplot(5, 2, i)
+    sns.kdeplot(tabela[column], ax=ax)
+    ax.set_xlim(left=0)
+    
+    i+=1
+
+plt.tight_layout()  
+plt.show()
+```
+
+## Korelacje
+
+```{python}
+corr=tabela.corr()
+
+mask = np.triu(np.ones_like(corr, dtype=bool))
+
+
+f, ax = plt.subplots(figsize=(11, 9))
+
+
+cmap = sns.diverging_palette(230, 20, as_cmap=True)
+
+
+sns.heatmap(corr, mask=mask, cmap=cmap, vmax=.3, center=0,
+            square=True, linewidths=.5, cbar_kws={"shrink": .5})
+```
+
+
+Występuje kilka umiarkowanych zależności m.in.:
+
+- ilością samochodów a parków
+- ilością samochodów a dostępem do kanalizacji
+- bezrobociem powyżej roku a dostępem do kanalizacji
+
+
+
+# Porządkowanie liniowe
+
+## Zamiana na stymulanty
+
+W naszych danych występują następujące destymulanty: *bezrobotni,bezrobocie,zgony*. Do przeprowadzenia porządkowania liniowego potrzebuję samych stymulant, więc mnożę te zmienne przez -1.
+
+
+```{python}
+tabela[['zgony','bezrobocie','bezrobotni']]=tabela[['zgony','bezrobocie','bezrobotni']]* -1
+```
+
+## Metody bezworcowe
+
+### Metoda standaryzowanych sum
+
+Metoda standaryzowanych sum należy do technik bezwzorcowych porządkowania liniowego. Po uprzednim zmienieniu zmiennych diagnostycznych na stymulanty i standaryzacji sumuję oszacowania uzyskane w ramach obiektów według wzoru: $$
+s_i = \frac{1}{m} \sum_{j=1}^{m} \alpha_i z_{ij}
+$$
+
+Przeprowadzam standaryzację danych.
+
+```{python}
+from sklearn.preprocessing import MinMaxScaler,StandardScaler
+
+normalizer=StandardScaler()
+minmax=MinMaxScaler()
+
+
+df=pd.DataFrame(normalizer.fit_transform(tabela.copy()),columns=tabela.columns,index=tabela.index)
+
+```
+
+Po przeprowadzeniu standaryzacji tak wyglądają przykładowe wiersze tabeli.
+
+
+```{python results='hide'}
+df.head()
+```
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/standarized.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+
+
+Następnie sumuje wartości każdej zmiennej i na koniec unitaryzuję wskaźnik syntetyczny 'WSK', by był na przedziale od 0 do 1. Poniżej znajdują się wyniki metody standaryzowanych sum:
+
+```{python}
+df['WSK']=df.sum(axis=1)/len(df.columns)
+df['WSK']=minmax.fit_transform(df['WSK'].values.reshape(-1,1))
+df['WSK'].nlargest(7)
+```
+
+Najwyższy syntetyczny wskaźnik ma miasto Katowice, następnie jest Chorzów i Tychy. Warto zauważyć że między 2 i 3 miejscem różnica jest minimalna.
+
+
+
+### Metoda sum rang
+
+W metodzie sum rang nadaję rangi poszególnym wierszom w każdej kolumnie (od najmniejszej do największej), a następnie sumuję rangi dla każdego wiersza. Na koniec przeprowadzam unitaryzację. Poniżej znajduje się tabelka z wynikami metody sum rang:
+
+```{python}
+df1=tabela.copy()
+for column in df1.columns:
+    nazwa=str(column)
+    df1[nazwa]=df1[column].rank()
+
+df1['WSK']=df1.sum(axis=1)
+df1['WSK']=minmax.fit_transform(df1['WSK'].values.reshape(-1,1))
+
+df1['WSK'].nlargest(7)
+```
+
+
+W przypadku sum rang widzimy zmiany w porównaniu do metody standaryzowanych sum. Na pierwszym miejscu są tym razem Tychy, potem Częstochowa i Chorzów. Przy użyciu tej metody Katowice znalazły się na miejscu 6.
+
+## Metoda wzorcowa
+
+### Metoda Hellwiga
+
+W przypadku metody Hellwiga na początku przeprowadzam standaryzację. Następnie znajduję maksymalne wartości dla każdej zmiennej diagnostycznej i uzyskuję wzorzec. 
+
+W następnym kroku liczę odległości obiektów od wzorca ze wzoru: $$d_i = \sqrt{\sum (x_{ij} - d_j^+)^2}$$
+
+Wyznaczam odległość możliwie daleką i w ostatnim kroku wyznaczam WSK.
+
+Poniżej znajduje się tabela z wynikami metody Hellwiga:
+
+```{python}
+df2=pd.DataFrame(normalizer.fit_transform(tabela.copy()),index=tabela.index,columns=tabela.columns)
+wzorzec=np.array(df2.max(axis=0))
+def oblicz_di(wiersz, wzorzec):
+    return np.sqrt(np.sum((wiersz - wzorzec) ** 2))
+
+df2['odleglosc'] = df2.drop(columns='odleglosc', errors='ignore').apply(lambda row: oblicz_di(row.values, wzorzec), axis=1)
+odlegosc_daleka=np.mean(df2['odleglosc'])+2*np.std(df2['odleglosc'])
+df2['WSK']=1-(df2['odleglosc']/odlegosc_daleka)
+df2['WSK'].nlargest(7)
+```
+
+Najlepszym miastem tym razem okazują się Katowice, następnie Tychy i Chorzów. 
+
+
+
+
+# Podsumowanie porządkowania liniowego
+
+## Wykresy radarowe
+
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/newplot.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+
+
+Wyniki wszystkich trzech metod są ze sobą całkiem zgodne i można by rzec że Tychy bądź Katowice są najlepszym miejscem do mieszkania. Jednocześnie widzimy znaczące zróżnicowanie poziomu życia między powiatami miejskimi a grodzkimi. 
+
+Na powyższym wykresie prawie cała prawa strona zawiera głównie powiaty grodzkie i jest znacznie mniejsza niż lewa z powiatami miejskimi, co ilustruje nam te znaczące zróżnicowanie w poziomie życia. 
+
+Warto zwrócić uwagę również na wysoki poziom życia miast z konurbacji górnośląskiej, ponieważ większość z nich znajduje się w czołówce w każdej metodzie - są to na przykład Katowice, Chorzów, Tychy, Dąbrowa Górnicza, Bytom itd. Miasta te występują bardzo blisko siebie i tworzą "jedne wielkie miasto". W miastach Konurbacji górnośląskiej żyje łącznie 2 miliony ludzi, czyli tyle co w Warszawie.
+
+
+## Korelacje
+
+Zbadam teraz korelacje jakie wystąpiły między metodami, aby sprawdzić czy wyniki w miarę się pokrywają. 
+
+```{python}
+metody=pd.DataFrame({'standSum':df['WSK'],'sumRang':df1['WSK'],'hellwig':df2['WSK']})
+corrmetody=metody.corr()
+```
+Pearson:
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/corrmetody.png" style="display: block; margin-left: auto; margin-right: auto;"/>
+
+```{python}
+metody=pd.DataFrame({'standSum':df['WSK'],'sumRang':df1['WSK'],'hellwig':df2['WSK']})
+corrmetody=metody.corr(method='kendall')
+```
+
+Tau-Kendall:
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/taukendall.png" style="display: block; margin-left: auto; margin-right: auto;"/>
+
+
+W przypadu korelacji liniowej Pearsona występują bardzo wysokie korelacje między wykorzystanymi przeze mnie metodami. Gdy użyjemy Tau-Kendalla korelacje te są niższe, ale nadal mówimy tu o wysokiej zgodności ze sobą. Można powiedzieć, że metoda Hellwiga trochę bardzej podobnie uporządkowała wyniki jak metoda sum rang niż metoda standaryzowanych sum,
+
+
+# Analiza skupień
+
+Zanim zaczniemy przeprowadzać analizę skupień usunę wartości odstające, gdyż mogą one znacznie wpływać na wyniki grupowań. Aby to zrobić, skorzystam z własności reguły 3 sigm i sprawdzę gdzie po standaryzacji danych jakieś wartości są większe od 3 lub mniejsze od -3
+
+```{python echo=T, results='hide'}
+df3=pd.DataFrame(normalizer.fit_transform(tabela.copy()),columns=tabela.columns,index=tabela.index)
+
+print(df3[((df3 > 3) | (df3<-3)).any(axis=1)])
+```
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/odstajace.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+Mamy 3 powiaty, które po standaryzacji w jednej ze zmiennych diagnostycznych uznajemy za wartości odstające. Postanowiłem, że nie będę usuwał całych wierszy tylko w zmiennych diagnostycznych, które są wartościami odstającymi ustawię wartość 3 lub -3.
+
+```{python}
+
+df3.loc['Powiat lubliniecki','drogi rowerowe']=3
+df3.loc['Powiat m. Chorz\u00f3w','parki']=3
+df3.loc['Powiat m. Katowice','lekarze']=3
+```
+
+
+
+
+## K-means
+
+Metoda k-średnich jest metodą grupowania podziałowego i opiera się na przenoszeniu obiektów ze skupienia do skupienia tak długo aż zostaną zoptymalizowanie zmienności wewnątrz skupień oraz pomiędzy skupieniami. Przyjmując, że odległość między obiektami jest definiowana metryką *d*, uzyskuje się warunek: $$ \min \left\{ \sum_{n=1}^{N} \frac{1}{\# G_n} \sum_{P_i, P_j \in G_n} d(P_i, P_j) \right\} $$
+
+Na początek sprawdźmy ile skupień powinniśmy ustawić. W tym celu ma nam pomóc przygotowany przeze mnie wykres. Parametr *inertia* mierzy jak dobrze nasze dane zostały podzielone przez k-średnich.
+
+```{python echo=T,results='hide'}
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+
+ks = range(1, 10)
+inertias = []
+
+for k in ks:
+   
+    model=KMeans(n_clusters=k)
+    inertias.append(model.fit(df3).inertia_)
+    
+```
+
+```{python eval=FALSE, include=FALSE}
+plt.plot(ks, inertias, '-o')
+plt.xlabel('number of clusters, k')
+plt.ylabel('inertia')
+plt.xticks(ks)
+#plt.show()
+```
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/interia.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+Generalnie powinniśmy przyjąć takie k, aby różnica między następnym k zaczęła robić się minimalna. Na powyższym wykresie taki moment zaczyna się po k=3 do k=5. Niestety w naszym przypadku wykres ten nie jest tak pomocny, więc sprawdzimy kilka opcji.
+
+### Dwa klastry
+
+```{python echo=TRUE}
+np.random.seed(42)
+pca=PCA(2)
+df31=pca.fit_transform(df3.copy())
+knn=KMeans(n_clusters=2)
+label=knn.fit_predict(df31)
+
+u_labels = np.unique(label)
+```
+
+```{python eval=FALSE, include=FALSE}
+
+for i in u_labels:
+    plt.scatter(df31[label == i , 0] , df31[label == i , 1] , label = i)
+plt.legend()
+
+
+
+for i, txt in enumerate(tabela.index):
+    plt.annotate(txt, (df31[i,0], df31[i,1]), fontsize=7, weight='normal')  
+
+#plt.show()
+```
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/kmeans2.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+Aby pokazać wyniki na powyższym wykresie użyłem techniki PCA, która zmniejszyła wymiary moich danych tak, by można je było przedstawić na wykresie w dwóch wymiarach.
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/2klastrymapa.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+W przypadku gdy mamy dwa klastry podział został przeprowadzony głównie na powiaty miejskie i grodzkie. Powiaty grodzkie zostały przydzielone do grupy pierwszej (pomarańczowej), a powiaty miejskie do grupy zerowej (niebieskie).
+W zasadzie możemy powiedzieć, że do grupy pierwszej nie zostało przydzielone żadne miasto, ale już w grupie zerowej znajdziemy kilka wyjątków takich jak:
+
+```{python}
+clusters=pd.DataFrame({'cluster':label},index=tabela.index)
+#clusters[clusters['cluster'] == 0].head()
+```
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/kmeans2grupa0.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+Widzimy 4 powiaty grodzkie, które zostały zaliczone do grupy tych 'miejskich'. W przypadku powiatu bieruńsko-lędzińskiego przyczyną może być fakt, że na terenie znajduje się kopalnia węgla kamiennego, co może prowadzić do większych dochodów powiatu. W powiecie będzińskim znajduje się dość spore miasto Będziń, które nie ma własnego powiatu, więc jest włączone do powiatu będzińskiego. Podobna sytuacja występuje w powiecie mikołowskim, gdzie włączone jest spore miasto Mikołów. Natomiast powiatu pszczyńskiemu możemy przyjrzeć się bliżej:
+
+```{python echo=T, results='hide'}
+tabela.loc[['Powiat pszczyński', 'Powiat m. Katowice','Powiat żywiecki','Powiat myszkowski','Powiat bielski','Powiat m. Bielsko-Biała']]
+```
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/2kmeansPszczyna.png" style="display: block; margin-left: auto; margin-right: auto;" />
+Dla porównania pokazuję również kilka miast i powiatów. Powodem przez który powiat pszczyński znalazł się w grupie powiatów miejskich wydaje się być fakt sporej liczby powierzchni parków na 1 mieszkańca oraz niskim wskaźnikiem zgonów niemowląt. Jest też bardzo możliwe, że powiat ten jest na granicy tych dwóch klastrów i akurat trafił do tych miejskich.
+
+### Trzy klastry
+
+```{python echo=T, results='hide'}
+pca=PCA(2)
+df32=pca.fit_transform(df3.copy())
+knn=KMeans(n_clusters=3)
+label=knn.fit_predict(df32)
+
+u_labels = np.unique(label)
+
+```
+
+```{python include=FALSE}
+for i in u_labels:
+    plt.scatter(df32[label == i , 0] , df32[label == i , 1] , label = i)
+plt.legend()
+
+
+
+
+for i, txt in enumerate(tabela.index):
+    plt.annotate(txt, (df32[i,0], df32[i,1]), fontsize=7, weight='normal')  
+
+plt.show()
+```
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/kmeans3.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/3klastrymapa.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+Tak wygląda podział powiatów na 3 klastry. Jako że w przypadku 3 klastrów podział jest prosty - duże miasta zostały podzielone na jedną grupę, a powiaty grodzkie na dwie mniejsze grupki pozwolę sobie przejść do analizy czterech klastrów, która wydaje się być bardziej trafna.
+
+
+### Cztery klastry
+
+```{python echo=T, results='hide'}
+np.random.seed(42)
+pca=PCA(2)
+df3=pca.fit_transform(df3)
+knn=KMeans(n_clusters=4)
+label=knn.fit_predict(df3)
+
+u_labels = np.unique(label)
+```
+
+```{python eval=FALSE, include=FALSE}
+for i in u_labels:
+    plt.scatter(df3[label == i , 0] , df3[label == i , 1] , label = i)
+plt.legend()
+
+
+
+# for i, txt in enumerate(tabela.index):
+#     plt.figure(figsize=(14, 12))  # Increase the figure size
+
+for i, txt in enumerate(tabela.index):
+    plt.annotate(txt, (df3[i,0], df3[i,1]), fontsize=7, weight='normal')  # Increase font size and make it bold
+
+plt.show()
+```
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/kmeans4.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+Gdy ustawimy podział na 4 klastry otrzymamy takie wyniki. Wykres nie jest do końca czytelny przedstawię teraz jakie powiaty należą do każdej z grup i postaram się wyjaśnić dlaczego tak może być. Przedstawiam powiaty na mapie:
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/4klastrymapa.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+
+
+
+```{python echo=T, results='hide'}
+clusters1=pd.DataFrame({'cluster':label},index=tabela.index)
+#clusters1[clusters1['cluster'] == 0]
+```
+
+#### Klaster 0
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/kmeans4grupa0.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+W klastrze 0 znalazły się głównie miasta konurbacji górnośląskiej np. Katowice, Gliwice, Zabrze, Bytom itd. Wyjątkami są Częstochowa, Bielsko-Biała oraz Żory. Tak naprawdę ta grupa przedstawia największe i najważniejsze miasta na Śląsku.
+
+```{python}
+clusters1=pd.DataFrame({'cluster':label},index=tabela.index)
+#clusters1[clusters1['cluster'] == 1]
+```
+
+#### Klaster 1
+
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/kmeans4grupa1.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+
+
+W tej grupie również znalazły się przede wszystkim powiaty grodzkie znajdujące się w centralnej części województwa i jedno miasto. Większość z nich, oprócz powiatu cieszyńskiego, znajduje się na północy i zachodzie, czyli bliżej terenów górniczych i przemysłowych. 
+
+
+#### Klaster 2
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/kmeans4grupa2.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+
+W klastrze 2 znalazły się powiaty znajdujące się już powyżej konurbacji śląskiej, czyli przy Częstochowie. 
+
+#### Klater 3
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/kmeans4grupa3.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+
+W tej grupie znalazły się głownie powiaty grodzkie, miasto Żory i Rybnik znajdujące się na południowym zachodzie Śląska oraz 2 miasta - Dąbrowa Górnicza i Mysłowice z tej górej, bardziej uprzemysłowionej części Śląska.
+
+
+## Podsumowanie k-średnich
+
+Oczywisty podział na dwa klastry pokazuje nam, że występują różnice między powiatami grodzkimi i miejskimi. 
+
+W przypadku podziału na cztery klastry możemy zauważyć jak bardzo zróżnicowany pod względem rozwoju jest Śląsk. Jest to zapewne spowodowane historią, gdzyż podział na te klastry w jakimś stopniu zgadza się z historycznym podziałem Śląska, który znajdował się w 3 zaborach  - na północnym zachodzie oraz zachodzie, czyli w terenach konurbacji śląskiej, był w zaborze pruskim (klastry 0 i 1 oraz część klastra 3); na południowym wschodzie, czyli terenach blisko Bielska-Białej (klaster 3), tereny były pod zaborem austriackim; a na samej północy w okolicach Częstochowy w zaborze rosyjskim (klaster 2). 
+
+Bardziej uwidocznione jest to na powiatach grodzkich, gdyż miejskie szybciej się rozwineły i z biegiem czasu bardzo zbliżyły się do siebie. Większość dużych miast trafia do jednego worka pomimo wcześniejszych podziałów.
+
+Poniżej przedstawiam mapkę przedstawiającą jak podzielony był Śląsk podczas zaborów w latach 1795-1918 (podział jest przedstawiony białą linią). Dodatkowo jeszcze na mapce widzimy podział kolorami na dawne województwo Śląskie i Małopolskie. Co ciekawe aktualne tereny województwa Śląskiego składają się w prawie połowie z terenów dawnego województwa Małopolskiego.
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/rozbiory.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+**źródło: wslaskie.pl**
+
+ 
+
+## Grupowanie hierarchiczne
+
+W odróżnieniu do grupowania porządkowego, algorytm ten sam ustala liczbę klastrów. Wykorzystuje się tutaj funkcję odległości. Każdy element zbioru jest łączony w coraz większe grupy aż do uzyskania jednego skupienia, który zawiera wszystkie obiekty.W moich obliczeniach wykorzystam metodę Warda, która bazuje na ANOVA. Na każdym etapie minimaluzuje się wzrost łącznej sumy kwadratów odchyleń wszystkich cech dla każdego obiektu w obrębie grupy od średnich w skupieniu.
+
+```{python}
+from scipy.cluster.hierarchy import dendrogram, linkage
+df4=pd.DataFrame(normalizer.fit_transform(tabela.copy()),columns=tabela.columns,index=tabela.index)
+linkage_data=linkage(df4,method='ward',metric='euclidean')
+```
+
+```{python eval=FALSE, include=FALSE}
+dendrogram(linkage_data, labels=tabela.index, leaf_rotation=90, orientation='right')
+plt.xticks(rotation=0, fontsize=8)
+plt.yticks(rotation=0, fontsize=8)
+plt.tight_layout()
+plt.show()
+```
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/hierarchiczny.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+Algorytm w pózniejszym etapie połączył klaster czerwony z fioletowym, przez co powstał nam klaster z w zasadzie najważniejszymi miastami Śląska. W kolejnym kroku połączył się on z klastrem zielonym.
+
+
+W przypadku grupowania hierarchicznego, algorytm sam ustalił 4 główne klastry:
+
+### Klaster fioletowy
+
+Znalazły się tam powiaty głównie z północy Śląska w tym średniej wielkości miasta takie jak Tychy oraz Żory oraz jedno większe miasto Częstochowa.
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/klaster4hierch.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+Statystyki jednoznacznie wskazują na spore miasta, na co wskazuje chociażby fakt że procent dostępu do kanalizacji jest bardzo wysoki. W tym klastrze również występuje stosunkowo niskie bezrobocie i spora powierzchnia parków, co najbardziej wyróżnia go od drugiego klastra z miastami.
+
+### Klaster czerwony
+
+Znalazły się tam 3 duże miasta - Katowice, Gliwice i Bielsko-Biała. 
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/klaster3hierch.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+**Klaster lekarzy**. Zdecydowanie cechą która ten klaster może opisać jest wysoka dostępność lekarzy na 10 tys. ludności. 
+
+### Klaster zielony
+
+Znajduje się tam większość powiatów grodzkich oraz kilka większych miast z Konurbacji górnośląskiej takich jak Zabrze, Bytom.
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/klaster2hierch.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+Można go uznać za taki pomieszany klaster - z jednej strony mamy dość dużo oddanych mieszkań na 1000 małżeństw, co charakteryzuje powiaty grodzkie, a z drugiej jeszcze dość wysoki wskaźnik dostępu kanalizacji co jest bardziej podobne do miast.
+
+### Klaster pomarańczowy
+
+Głownie powiaty znajdujące się koło Częstochowy, czyli z samej północy Śląska. Wyjątkiem jest powiat cieszyński. Ten klaster jest bardzo podobny do tego, który powstał przy k-średnich z 4 klastrami.
+
+<img src="C:/Users/kacpr/Documents/semestr 5/SAD/klaster1hierch.png" style="display: block; margin-left: auto; margin-right: auto;" />
+
+Wysoka ilość osób bezrobotnych na 1 ofertę pracy oraz duża liczba oddanych mieszkań na 1000 małżeństw najbardziej wyróżnia ten klaster.
+
+
+
+
+
+## Podsumowanie analizy skupień
+
+Wyniki analizy skupień różnią się od siebie dość znacząco. W przypadku algorytmu k-średnich z 4 klastrami algorytm przyporządkował większość dużych miast do jednej grupy, a w przypadku grupowania hierarchicznego w każdym klastrze (oprócz żółtego) mamy jakieś duże miasto. Szczególnie ciekawym klastrem jest ten czerwony, do którego trafiły tylko 3 duże miasta. Jedynym podobieństwem jest klaster żółty (z metody hierarchicznej) oraz klaster 2 z metody k-średnich z 4 klastrami.
+
+
+# Podsumowanie
+
+Porządkowanie liniowe pozwoliło nam zobaczyć, że zróżnicowanie poziomu życia w województwie Śląskim występuje, co szczególnie widać na przykładzie dużych miast oraz powiatów grodzkich. Szczególnie wysokim poziomem życia odznaczają się miasta położone w konurbacji górnośląskiej takie jak Katowice, Chorzów, Bytom, Dąbrowa Górnicza itd. Natomiast wiele powiatów grodzkich pozostaje daleko w tyle w stosunku do dużych miast.
+
+Analiza skupień natomiast podzieliła na grupy wszystkie powiaty. Co ciekawe, podział uzyskany metodą k-średnich z 4 klastrami pokrywa się w jakimś stopniu z zaborami Polski, gdyż Śląsk w tamtym czasie znajdował się we wszystkich trzech zaborach. Po ustawieniu 2 klastrów wyszedł również oczywisty podział na powiaty miejskie i grodzkie z kilkoma wyjątkami. To również pokazuje nam, że zróżnicowanie poziomu życia występuje w całym województwie. Pojawiały się nawet pomysły, żeby województwo zmieniło nazwę na Śląsko-Małopolskie, właśnie ze względu na duże zróżnicowanie kulturowe różnych regionów tego województwa.

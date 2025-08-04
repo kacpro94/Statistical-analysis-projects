@@ -1,0 +1,128 @@
+---
+title: "projekt2sad"
+author: "Kacper Prorok"
+date: "2024-11-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+Model ANOVA - założenia
+Zmienna zależna ma wartości na skali przedziałowej
+Spełniona I i II zasada randomizacji (próbka została wybrana z populacji w sposób losowy, elementy próby zostały przypisane do danych podgrup losowo)
+Niezależność pomiarów
+Dane w każdej podgrupie mają rozkład normalny
+Wariancje w podgrupach są równe
+
+```{r}
+library(stats)
+ogłoszenia <- read.csv("ogłoszenia.csv", sep = ";")
+interaction.plot(ogłoszenia$Day, ogłoszenia$Section, ogłoszenia$Response, 
+                 ylab="Response", xlab="Day", trace.label="Section", lwd=3)
+
+```
+
+
+```{r cars}
+
+
+ogłoszenia
+
+```
+```{r}
+tapply(ogłoszenia$Response, ogłoszenia$Section,shapiro.test)
+```
+
+```{r}
+tapply(ogłoszenia$Response, ogłoszenia$Day,shapiro.test)
+```
+```{r}
+library(dplyr)
+
+ogłoszenia$Day_Section <- paste(ogłoszenia$Day, ogłoszenia$Section, sep = "_") # "_" jako separator
+```
+
+
+```{r}
+tapply(ogłoszenia$Response, ogłoszenia$Section,shapiro.test)
+```
+```{r}
+tapply(ogłoszenia$Response, ogłoszenia$Day_Section,shapiro.test)
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+bartlett.test(Response ~ Day, data = ogłoszenia)
+```
+```{r}
+bartlett.test(Response ~ Section, data = ogłoszenia)
+```
+
+
+```{r}
+
+bartlett.test(Response ~ interaction(Day, Section), data = ogłoszenia)
+```
+```{r}
+anova<-aov(Response ~ Day*Section,data=ogłoszenia)
+summary(anova)
+tukey_result <- TukeyHSD(anova)
+```
+```{r}
+p_adj <- tukey_result$`Day:Section`[, "p adj"]
+
+# Wybieranie tylko tych, które spełniają warunek
+significant <- p_adj[p_adj < 0.05]
+
+# Wyświetlenie wyników
+print(significant)
+```
+
+```{r}
+p_adj <- tukey_result$Day[, "p adj"]
+
+# Wybieranie tylko tych, które spełniają warunek
+significant <- p_adj[p_adj < 0.05]
+
+# Wyświetlenie wyników
+print(significant)
+```
+
+```{r}
+p_adj <- tukey_result$Section[, "p adj"]
+
+# Wybieranie tylko tych, które spełniają warunek
+significant <- p_adj[p_adj < 0.05]
+
+# Wyświetlenie wyników
+print(significant)
+```
+
+# Ancova
+
+```{r}
+
+library(datarium)
+
+```
+
+
+Zmienną zależną będzie score a zmiennymi wyjaśniającymi będą treatment i exxercise, ale chcemy zbadać czy zmienna age wpływa na nasze wyniki
+
+```{r}
+data(stress)
+
+stress
+```
+```{r}
+write.csv(stress, file = "my_data.csv", row.names = FALSE)
+```
+
